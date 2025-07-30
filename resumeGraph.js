@@ -14,6 +14,7 @@ const ExperienceSchema = z.object({
 const QuestionAnswerSchema = z.object({
   question: z.string(),
   answer: z.string(), // "yes" or "no"
+  reason: z.string(), // NEW: Added reason field
 });
 
 // Updated ExtractedDetailsSchema to exclude brevity and style
@@ -26,9 +27,7 @@ const ExtractedDetailsSchema = z.object({
   skills_score: z.union([z.number(), z.null()]).optional(), // Metric retained
   overall_score: z.union([z.number(), z.null()]).optional(), // Retained, calculation will change
   matched: z.union([z.boolean(), z.null()]).optional(),
-  questions_answers: z
-    .union([z.array(QuestionAnswerSchema), z.null()])
-    .optional(),
+  evaluation: z.union([z.array(QuestionAnswerSchema), z.null()]).optional(),
 });
 
 const MissingSkillsSchema = z.object({
@@ -50,7 +49,7 @@ const ResumeGraphState = Annotation.Root({
   skills_score: Annotation(z.union([z.number(), z.null()]).optional()),
   overall_score: Annotation(z.union([z.number(), z.null()]).optional()),
   matched: Annotation(z.union([z.boolean(), z.null()]).optional()),
-  questions_answers: Annotation(
+  evaluation: Annotation(
     z.union([z.array(QuestionAnswerSchema), z.null()]).optional()
   ),
   route: Annotation(
@@ -62,7 +61,7 @@ const ResumeGraphState = Annotation.Root({
 });
 
 // Step 2: LLM instance
-const llm = new ChatOpenAI({ model: "gpt-4o", temperature: 0.3 });
+const llm = new ChatOpenAI({ model: "gpt-4.1-mini", temperature: 0.1 });
 
 // Helper function to parse month name to number
 function getMonthNumber(monthName) {
@@ -108,7 +107,7 @@ async function extractDetails(state) {
         - responsibilities: An array of key responsibilities/achievements.
     - totalExperienceInYears: The total professional experience in years, inferred from the durations. Round to one decimal place.
 
-    **Evaluate the resume based on the following questions and provide 'yes' or 'no' answers:**
+    **Evaluate the resume based on the following questions and provide 'yes' or 'no' answers, along with a brief 'reason' for your answer:**
     - Are there grammatical/spelling mistakes?
     - Well-organized and easy to read?
     - Continuous learning through education?
@@ -145,9 +144,9 @@ async function extractDetails(state) {
       "skills_score": 85,
       "overall_score": 80,
       "matched": true,
-      "questions_answers": [
-        {"question": "Are there grammatical/spelling mistakes?", "answer": "no"},
-        {"question": "Well-organized and easy to read?", "answer": "yes"}
+      "evaluation": [
+        {"question": "Are there grammatical/spelling mistakes?", "answer": "no", "reason": "No obvious errors found."},
+        {"question": "Well-organized and easy to read?", "answer": "yes", "reason": "Clear headings and bullet points make it scannable."}
         // ... all other questions
       ]
     }
@@ -171,8 +170,15 @@ async function extractDetails(state) {
       if (typeof exp.duration === "string" && exp.duration.includes(" – ")) {
         let [startMonthYearStr, endMonthYearStr] = exp.duration.split(" – ");
 
+        // Current year in Mumbai, India
+        const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.toLocaleString("en-US", {
+          month: "long",
+        });
+
         if (endMonthYearStr.toLowerCase() === "present") {
-          endMonthYearStr = `July 2025`; // Using current time for 'Present'
+          endMonthYearStr = `${currentMonth} ${currentYear}`;
         }
 
         const [startMonthName, startYearStr] = startMonthYearStr.split(" ");
@@ -244,7 +250,7 @@ async function extractDetails(state) {
     skills_score: result.skills_score,
     overall_score: overallScore, // Use calculated overall score
     matched: matched, // Use calculated matched status
-    questions_answers: result.questions_answers || [],
+    evaluation: result.evaluation || [],
     route: finalTotalExperience >= 3 ? "senior" : "junior",
   };
 
@@ -264,7 +270,7 @@ async function juniorAnalysis(state) {
     totalExperienceInYears: state.totalExperienceInYears,
     overall_score: state.overall_score,
     matched: state.matched,
-    questions_answers: state.questions_answers,
+    evaluation: state.evaluation,
   });
 
   const structuredLlm = llm.withStructuredOutput(MissingSkillsSchema);
@@ -301,7 +307,7 @@ async function seniorAnalysis(state) {
     totalExperienceInYears: state.totalExperienceInYears,
     overall_score: state.overall_score,
     matched: state.matched,
-    questions_answers: state.questions_answers,
+    evaluation: state.evaluation,
   });
 
   const structuredLlm = llm.withStructuredOutput(MissingSkillsSchema);

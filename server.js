@@ -17,6 +17,7 @@ app.post("/analyze-resume", async (req, res) => {
     }
 
     const text = await parseBase64Resume(fileBase64, filename);
+    console.log("--Parsed resume text:", text);
     const graph = await buildResumeGraph();
     const result = await graph.invoke({ resumeText: text });
 
