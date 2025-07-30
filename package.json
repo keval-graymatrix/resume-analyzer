@@ -1,0 +1,28 @@
+{
+  "name": "resume-analyzer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon server.js"
+  },
+  "author": "Keval",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@langchain/core": "^0.3.66",
+    "@langchain/langgraph": "^0.3.12",
+    "@langchain/openai": "^0.6.3",
+    "axios": "^1.11.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "langchain": "^0.3.30",
+    "mammoth": "^1.9.1",
+    "multer": "^2.0.2",
+    "nodemon": "^3.1.10",
+    "openai": "^5.10.2",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.25.76"
+  }
+}
