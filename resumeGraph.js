@@ -10,20 +10,32 @@ const ExperienceSchema = z.object({
   responsibilities: z.array(z.string()),
 });
 
-// FIX: Explicitly define email as a union of z.string().email() and z.null()
+// Schema for the individual question/answer pairs
+const QuestionAnswerSchema = z.object({
+  question: z.string(),
+  answer: z.string(), // "yes" or "no"
+});
+
+// Updated ExtractedDetailsSchema to exclude brevity and style
 const ExtractedDetailsSchema = z.object({
   email: z.union([z.string().email(), z.null()]).optional(),
   phone: z.union([z.string(), z.null()]).optional(),
   experience: z.union([z.array(ExperienceSchema), z.null()]).optional(),
-  // NEW: Add totalExperienceInYears to the schema
   totalExperienceInYears: z.union([z.number(), z.null()]).optional(),
+  impact: z.union([z.number(), z.null()]).optional(), // Metric retained
+  skills_score: z.union([z.number(), z.null()]).optional(), // Metric retained
+  overall_score: z.union([z.number(), z.null()]).optional(), // Retained, calculation will change
+  matched: z.union([z.boolean(), z.null()]).optional(),
+  questions_answers: z
+    .union([z.array(QuestionAnswerSchema), z.null()])
+    .optional(),
 });
 
 const MissingSkillsSchema = z.object({
   missingSkills: z.union([z.array(z.string()), z.null()]).optional(),
 });
 
-// FIX: Explicitly define fields in ResumeGraphState as unions
+// Updated ResumeGraphState to exclude brevity and style
 const ResumeGraphState = Annotation.Root({
   resumeText: Annotation(z.string()),
   email: Annotation(z.union([z.string().email(), z.null()]).optional()),
@@ -31,9 +43,15 @@ const ResumeGraphState = Annotation.Root({
   experience: Annotation(
     z.union([z.array(ExperienceSchema), z.null()]).optional()
   ),
-  // NEW: Add totalExperienceInYears to the ResumeGraphState
   totalExperienceInYears: Annotation(
     z.union([z.number(), z.null()]).optional()
+  ),
+  impact: Annotation(z.union([z.number(), z.null()]).optional()),
+  skills_score: Annotation(z.union([z.number(), z.null()]).optional()),
+  overall_score: Annotation(z.union([z.number(), z.null()]).optional()),
+  matched: Annotation(z.union([z.boolean(), z.null()]).optional()),
+  questions_answers: Annotation(
+    z.union([z.array(QuestionAnswerSchema), z.null()]).optional()
   ),
   route: Annotation(
     z.union([z.enum(["junior", "senior"]), z.null()]).optional()
@@ -69,18 +87,48 @@ function getMonthNumber(monthName) {
 async function extractDetails(state) {
   console.log("--- Entering extractDetails Node ---");
   console.log(
-    "Input to extractDetails:",
+    "Input to extractDetails (first 100 chars of resume):",
     state.resumeText.substring(0, 100) + "..."
-  ); // Log first 100 chars of resume
+  );
 
   const structuredLlm = llm.withStructuredOutput(ExtractedDetailsSchema);
 
   const prompt = [
     [
       "system",
-      `You are a resume parser. Extract the following details: email, phone, and a list of work experiences. Each experience should include company, duration (e.g., "Month Year – Month Year"), role, and responsibilities.
-    Infer the total years of experience from the durations and provide it as 'totalExperienceInYears' in a numerical format. If a duration is "Present", assume the end date is July 2025. Ensure all date durations are parsed into "Month Year – Month Year" format for consistency.
-    Example JSON output:
+      `You are a highly skilled resume analyzer. Your task is to extract specific details and evaluate the resume based on a set of criteria.
+
+    **Extract the following core details:**
+    - Email
+    - Phone number
+    - A list of work experiences. Each experience should include:
+        - company: Name of the company
+        - duration: Duration of employment (e.g., "Month Year – Month Year"). If "Present" is used, assume the end date is July 2025.
+        - role: Candidate's role at the company
+        - responsibilities: An array of key responsibilities/achievements.
+    - totalExperienceInYears: The total professional experience in years, inferred from the durations. Round to one decimal place.
+
+    **Evaluate the resume based on the following questions and provide 'yes' or 'no' answers:**
+    - Are there grammatical/spelling mistakes?
+    - Well-organized and easy to read?
+    - Continuous learning through education?
+    - Mentions of self learning projects?
+    - Staying current with industry trends?
+    - Public repos/open-source contributions?
+    - Technical complexity over time?
+    - Mastery in multiple technical domains?
+    - Clear progression in responsibility scope?
+    - Significant work history gaps?
+
+    **Provide scores out of 100 for the following metrics:**
+    - Impact (e.g., quantifiable achievements, results)
+    - Skills (relevance, depth, breadth of technical skills)
+
+    **Calculate the Overall Score:** This should be the average of Impact and Skills scores.
+    **Determine 'Matched' status:** Set to true if Overall Score is > 60, otherwise false.
+
+    **Ensure your output is a JSON object conforming to the provided schema.**
+    Example JSON structure:
     {
       "email": "test@example.com",
       "phone": "1234567890",
@@ -92,7 +140,16 @@ async function extractDetails(state) {
           "responsibilities": ["Developed X", "Managed Y"]
         }
       ],
-      "totalExperienceInYears": 2.9
+      "totalExperienceInYears": 2.9,
+      "impact": 75,
+      "skills_score": 85,
+      "overall_score": 80,
+      "matched": true,
+      "questions_answers": [
+        {"question": "Are there grammatical/spelling mistakes?", "answer": "no"},
+        {"question": "Well-organized and easy to read?", "answer": "yes"}
+        // ... all other questions
+      ]
     }
     `,
     ],
@@ -101,18 +158,19 @@ async function extractDetails(state) {
 
   const result = await structuredLlm.invoke(prompt);
 
-  console.log("LLM Raw Extracted Details Result:", result);
+  console.log(
+    "LLM Raw Extracted Details Result:",
+    JSON.stringify(result, null, 2)
+  );
 
   let totalExperienceMonths = 0;
-  let totalExperienceYears = 0;
+  let calculatedTotalExperienceYears = 0;
 
-  // Make sure result.experience is an array before iterating
   if (result.experience && Array.isArray(result.experience)) {
     result.experience.forEach((exp) => {
       if (typeof exp.duration === "string" && exp.duration.includes(" – ")) {
         let [startMonthYearStr, endMonthYearStr] = exp.duration.split(" – ");
 
-        // Handle "Present" for end date
         if (endMonthYearStr.toLowerCase() === "present") {
           endMonthYearStr = `July 2025`; // Using current time for 'Present'
         }
@@ -153,29 +211,47 @@ async function extractDetails(state) {
         console.warn(`Invalid duration format for experience: ${exp.duration}`);
       }
     });
-    totalExperienceYears =
+    calculatedTotalExperienceYears =
       totalExperienceMonths > 0 ? totalExperienceMonths / 12 : 0;
-    totalExperienceYears = parseFloat(totalExperienceYears.toFixed(1)); // Round to one decimal place
+    calculatedTotalExperienceYears = parseFloat(
+      calculatedTotalExperienceYears.toFixed(1)
+    ); // Round to one decimal place
   } else {
     console.log("No experience array or it's not an array.");
   }
 
-  // Ensure totalExperienceInYears is directly from LLM if provided, otherwise our calculation
+  // Use LLM's totalExperienceInYears if available, otherwise use calculated
   const finalTotalExperience =
     result.totalExperienceInYears !== null &&
     result.totalExperienceInYears !== undefined
       ? result.totalExperienceInYears
-      : totalExperienceYears;
+      : calculatedTotalExperienceYears;
+
+  // Calculate Overall Score based on LLM's scores (Impact and Skills)
+  let overallScore = null;
+  if (result.impact !== null && result.skills_score !== null) {
+    overallScore = (result.impact + result.skills_score) / 2; // Averaging only Impact and Skills
+    overallScore = parseFloat(overallScore.toFixed(1)); // Round to one decimal
+  }
+  const matched = overallScore !== null ? overallScore > 60 : false;
 
   const newState = {
     email: result.email,
     phone: result.phone,
     experience: result.experience || [],
-    totalExperienceInYears: finalTotalExperience, // Assign the calculated/provided total experience
+    totalExperienceInYears: finalTotalExperience,
+    impact: result.impact,
+    skills_score: result.skills_score,
+    overall_score: overallScore, // Use calculated overall score
+    matched: matched, // Use calculated matched status
+    questions_answers: result.questions_answers || [],
     route: finalTotalExperience >= 3 ? "senior" : "junior",
   };
 
-  console.log("Output from extractDetails Node:", newState);
+  console.log(
+    "Output from extractDetails Node:",
+    JSON.stringify(newState, null, 2)
+  );
   console.log("--- Exiting extractDetails Node ---");
   return newState;
 }
@@ -186,6 +262,9 @@ async function juniorAnalysis(state) {
   console.log("Input to juniorAnalysis (partial state):", {
     email: state.email,
     totalExperienceInYears: state.totalExperienceInYears,
+    overall_score: state.overall_score,
+    matched: state.matched,
+    questions_answers: state.questions_answers,
   });
 
   const structuredLlm = llm.withStructuredOutput(MissingSkillsSchema);
@@ -198,12 +277,18 @@ async function juniorAnalysis(state) {
     ["user", state.resumeText],
   ]);
 
-  console.log("LLM Raw Missing Skills (Junior) Result:", result);
+  console.log(
+    "LLM Raw Missing Skills (Junior) Result:",
+    JSON.stringify(result, null, 2)
+  );
 
   const newState = {
     missingSkills: result.missingSkills || [],
   };
-  console.log("Output from juniorAnalysis Node:", newState);
+  console.log(
+    "Output from juniorAnalysis Node:",
+    JSON.stringify(newState, null, 2)
+  );
   console.log("--- Exiting juniorAnalysis Node ---");
   return newState;
 }
@@ -214,6 +299,9 @@ async function seniorAnalysis(state) {
   console.log("Input to seniorAnalysis (partial state):", {
     email: state.email,
     totalExperienceInYears: state.totalExperienceInYears,
+    overall_score: state.overall_score,
+    matched: state.matched,
+    questions_answers: state.questions_answers,
   });
 
   const structuredLlm = llm.withStructuredOutput(MissingSkillsSchema);
@@ -226,12 +314,18 @@ async function seniorAnalysis(state) {
     ["user", state.resumeText],
   ]);
 
-  console.log("LLM Raw Missing Skills (Senior) Result:", result);
+  console.log(
+    "LLM Raw Missing Skills (Senior) Result:",
+    JSON.stringify(result, null, 2)
+  );
 
   const newState = {
     missingSkills: result.missingSkills || [],
   };
-  console.log("Output from seniorAnalysis Node:", newState);
+  console.log(
+    "Output from seniorAnalysis Node:",
+    JSON.stringify(newState, null, 2)
+  );
   console.log("--- Exiting seniorAnalysis Node ---");
   return newState;
 }
