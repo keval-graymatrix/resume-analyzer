@@ -1,36 +1,70 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-// import { buildResumeGraph } from "./resumeGraph.js";
 import { buildResumeGraph } from "./resumeGraph/buildGraph.js";
-import { parseBase64Resume } from "./utils/fileParser.js";
+import { parseResume } from "./utils/fileParser.js";
+import multer from "multer";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
 
 // Configure CORS to accept requests from the specific origin
 // The origin from the error message is: https://e8ff28cd6bae40a9bafa1a75d833d38d-94d4dca2fdbd4d508156316da.projects.builder.codes
 const corsOptions = {
-  origin:
+  origin: [
     "https://e8ff28cd6bae40a9bafa1a75d833d38d-94d4dca2fdbd4d508156316da.projects.builder.codes",
+    "http://localhost:5173",
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  credentials: true,
 };
 
 // Use the cors middleware with the specified options
 app.use(cors(corsOptions));
 
-app.post("/analyze-resume", async (req, res) => {
-  try {
-    const { fileBase64, filename } = req.body;
+// Optional: Add logging middleware to debug requests
+app.use((req, res, next) => {
+  console.log(
+    `Received ${req.method} request for ${req.url} from origin ${req.headers.origin}`
+  );
+  next();
+});
 
-    if (!fileBase64 || !filename) {
-      return res.status(400).json({ error: "Missing base64 file or filename" });
+// Configure multer for file uploads
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 }, // Limit file size to 5MB
+  fileFilter: (req, file, cb) => {
+    console.log("File type:", file.mimetype);
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF files are allowed"), false);
     }
-    console.log("--Parsed resume fileBase64:", fileBase64);
+  },
+});
 
-    const text = await parseBase64Resume(fileBase64, filename);
+// app.use(express.json({ limit: "10mb" })); // Still needed for non-multipart JSON requests
+
+app.post("/analyze-resume", upload.single("file"), async (req, res) => {
+  try {
+    console.log("Request headers:", req.headers);
+    console.log("Request body:", req.body);
+    console.log("Request file:", req.file);
+    const { filename } = req.body; // Get filename from form data
+    const file = req.file; // Get file from multer
+
+    if (!file || !filename) {
+      return res.status(400).json({ error: "Missing file or filename" });
+    }
+
+    console.log("--Received file:", file.originalname);
+
+    // Parse the resume from the file buffer
+    const text = await parseResume(file.buffer, filename);
     console.log("--Parsed resume text:", text);
+
     const graph = await buildResumeGraph();
     const result = await graph.invoke({ resumeText: text });
 

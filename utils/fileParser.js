@@ -16,3 +16,18 @@ export async function parseBase64Resume(base64String, filename) {
     throw new Error("Unsupported file type. Only PDF and DOCX are supported.");
   }
 }
+
+export const parseResume = async (fileBuffer, filename) => {
+  try {
+    if (!filename.toLowerCase().endsWith(".pdf")) {
+      throw new Error("Only PDF files are supported");
+    }
+
+    // Parse the PDF buffer to extract text
+    const data = await pdfParse(fileBuffer);
+    return data.text;
+  } catch (error) {
+    console.error("Error parsing resume:", error);
+    throw new Error("Failed to parse resume file");
+  }
+};
